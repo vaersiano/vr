@@ -1,0 +1,988 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Valla Virtual AR - Verificador de Perímetro</title>
+
+  <!-- PWA Manifest & Meta Tags -->
+  <meta name="theme-color" content="#0b132b">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+  <!-- JSZip para descompresión de archivos KMZ en el cliente -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+  <style>
+    :root {
+      --bg-dark: #0b132b;
+      --panel-bg: rgba(11, 19, 43, 0.85);
+      --accent-cyan: #00f2fe;
+      --accent-blue: #4facfe;
+      --border-blue: #1c2541;
+      --alert-inside: #00ff88;
+      --alert-outside: #ff3366;
+      --text-light: #e0e6ed;
+      --shadow-3d: 0 4px 15px rgba(0, 242, 254, 0.25);
+      --btn-gradient: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+      --btn-gradient-danger: linear-gradient(135deg, #ff416c 0%, #ff4b2b 100%);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: manipulation;
+    }
+
+    body, html {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #000;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: var(--text-light);
+    }
+
+    /* Contenedor Principal AR */
+    #app-container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* Video de Cámara de Fondo */
+    #camera-feed {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      z-index: 1;
+    }
+
+    /* Canvas de Superposición AR */
+    #ar-canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 2;
+      pointer-events: none;
+    }
+
+    /* Interfaz Superior - Status HUD */
+    .hud-top {
+      position: absolute;
+      top: 15px;
+      left: 15px;
+      right: 15px;
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .status-bar {
+      background: var(--panel-bg);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border: 1px solid rgba(0, 242, 254, 0.3);
+      border-radius: 16px;
+      padding: 12px 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+    }
+
+    .status-badge {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 700;
+      font-size: 0.9rem;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+
+    .status-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #888;
+      box-shadow: 0 0 8px currentColor;
+    }
+
+    .status-dot.inside {
+      background: var(--alert-inside);
+      color: var(--alert-inside);
+      animation: pulse 1.5s infinite;
+    }
+
+    .status-dot.outside {
+      background: var(--alert-outside);
+      color: var(--alert-outside);
+      animation: pulse 0.8s infinite;
+    }
+
+    @keyframes pulse {
+      0% { opacity: 0.4; transform: scale(0.9); }
+      50% { opacity: 1; transform: scale(1.1); }
+      100% { opacity: 0.4; transform: scale(0.9); }
+    }
+
+    /* Cinta de Brújula HUD */
+    .compass-hud {
+      background: var(--panel-bg);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(0, 242, 254, 0.2);
+      border-radius: 12px;
+      height: 44px;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .compass-tape {
+      position: absolute;
+      display: flex;
+      align-items: center;
+      white-space: nowrap;
+      transition: transform 0.1s linear;
+      font-family: monospace;
+      font-weight: bold;
+    }
+
+    .compass-tick {
+      display: inline-block;
+      width: 40px;
+      text-align: center;
+      font-size: 0.75rem;
+      color: rgba(255, 255, 255, 0.6);
+    }
+
+    .compass-tick.major {
+      color: var(--accent-cyan);
+      font-size: 0.9rem;
+    }
+
+    .compass-indicator {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: var(--accent-cyan);
+      box-shadow: 0 0 8px var(--accent-cyan);
+      z-index: 2;
+    }
+
+    .compass-indicator::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -4px;
+      width: 0;
+      height: 0;
+      border-left: 5px solid transparent;
+      border-right: 5px solid transparent;
+      border-top: 6px solid var(--accent-cyan);
+    }
+
+    /* Interfaz Inferior - Botones y Datos */
+    .hud-bottom {
+      position: absolute;
+      bottom: 25px;
+      left: 15px;
+      right: 15px;
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .telemetry-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+    }
+
+    .telemetry-card {
+      background: var(--panel-bg);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 8px;
+      text-align: center;
+    }
+
+    .telemetry-label {
+      font-size: 0.65rem;
+      color: rgba(255, 255, 255, 0.6);
+      text-transform: uppercase;
+    }
+
+    .telemetry-value {
+      font-size: 0.95rem;
+      font-weight: bold;
+      color: var(--accent-cyan);
+      margin-top: 2px;
+    }
+
+    .controls-row {
+      display: flex;
+      gap: 10px;
+    }
+
+    /* Botones 3D Estilo Futurista */
+    .btn-3d {
+      flex: 1;
+      background: var(--btn-gradient);
+      border: none;
+      border-radius: 12px;
+      color: #0b132b;
+      font-weight: 700;
+      font-size: 0.9rem;
+      padding: 14px 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      box-shadow: 0 4px 0 #0099cc, var(--shadow-3d);
+      cursor: pointer;
+      transition: all 0.1s ease;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .btn-3d:active {
+      transform: translateY(4px);
+      box-shadow: 0 0 0 #0099cc, 0 0 8px rgba(0, 242, 254, 0.5);
+    }
+
+    .btn-icon-only {
+      flex: 0 0 50px;
+      background: var(--panel-bg);
+      border: 1px solid rgba(0, 242, 254, 0.4);
+      color: var(--accent-cyan);
+      box-shadow: 0 4px 0 #0a1124;
+    }
+
+    .btn-icon-only:active {
+      box-shadow: 0 0 0 #0a1124;
+    }
+
+    /* Modal / Panel de Configuración y Archivos */
+    .modal-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(5, 9, 20, 0.85);
+      backdrop-filter: blur(15px);
+      -webkit-backdrop-filter: blur(15px);
+      z-index: 100;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+    }
+
+    .modal-overlay.active {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .modal-card {
+      background: #0b132b;
+      border: 1px solid rgba(0, 242, 254, 0.4);
+      border-radius: 20px;
+      width: 100%;
+      max-width: 420px;
+      max-height: 85vh;
+      overflow-y: auto;
+      padding: 24px;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8);
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      padding-bottom: 12px;
+    }
+
+    .modal-title {
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: var(--accent-cyan);
+    }
+
+    .close-btn {
+      background: transparent;
+      border: none;
+      color: #888;
+      font-size: 1.5rem;
+      cursor: pointer;
+    }
+
+    .setting-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .setting-label {
+      font-size: 0.85rem;
+      color: rgba(255, 255, 255, 0.8);
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .setting-input {
+      width: 100%;
+      padding: 10px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(0, 242, 254, 0.2);
+      border-radius: 8px;
+      color: #fff;
+      font-size: 0.9rem;
+    }
+
+    input[type="range"] {
+      accent-color: var(--accent-cyan);
+    }
+
+    /* Ocultar input file real */
+    #file-input {
+      display: none;
+    }
+
+    /* Mensajes Overlay / Permisos */
+    .permission-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: var(--bg-dark);
+      z-index: 200;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      padding: 30px;
+      text-align: center;
+      gap: 20px;
+    }
+
+    .permission-title {
+      font-size: 1.5rem;
+      color: var(--accent-cyan);
+      font-weight: 800;
+    }
+
+    .permission-desc {
+      font-size: 0.95rem;
+      color: rgba(255, 255, 255, 0.7);
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="app-container">
+    <!-- Stream de Cámara -->
+    <video id="camera-feed" autoplay playsinline muted></video>
+    
+    <!-- Canvas 2D/3D de Realidad Aumentada -->
+    <canvas id="ar-canvas"></canvas>
+
+    <!-- Top HUD Status -->
+    <div class="hud-top">
+      <div class="status-bar">
+        <div class="status-badge">
+          <div id="status-dot" class="status-dot"></div>
+          <span id="status-text">ESPERANDO GPS...</span>
+        </div>
+        <div style="text-align: right;">
+          <div style="font-size: 0.65rem; color: #888;">PRECISIÓN</div>
+          <div id="gps-accuracy" style="font-size: 0.85rem; font-weight: bold; color: var(--accent-cyan);">± -- m</div>
+        </div>
+      </div>
+
+      <!-- Cinta de Brújula -->
+      <div class="compass-hud">
+        <div class="compass-indicator"></div>
+        <div id="compass-tape" class="compass-tape"></div>
+      </div>
+    </div>
+
+    <!-- Bottom HUD Telemetría y Botones -->
+    <div class="hud-bottom">
+      <div class="telemetry-grid">
+        <div class="telemetry-card">
+          <div class="telemetry-label">Rumbo</div>
+          <div id="heading-val" class="telemetry-value">000°</div>
+        </div>
+        <div class="telemetry-card">
+          <div class="telemetry-label">Dist. Perímetro</div>
+          <div id="dist-val" class="telemetry-value">-- m</div>
+        </div>
+        <div class="telemetry-card">
+          <div class="telemetry-label">Vértices KML</div>
+          <div id="points-count" class="telemetry-value">0</div>
+        </div>
+      </div>
+
+      <div class="controls-row">
+        <button id="btn-load" class="btn-3d">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          CARGAR KMZ / KML
+        </button>
+        <button id="btn-config" class="btn-3d btn-icon-only">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <input type="file" id="file-input" accept=".kmz,.kml">
+
+  <!-- Modal de Configuración -->
+  <div id="modal-settings" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title">CONFIGURACIÓN VALLA AR</div>
+        <button id="btn-close-modal" class="close-btn">&times;</button>
+      </div>
+
+      <div class="setting-group">
+        <div class="setting-label">
+          <span>Altura de Valla Virtual</span>
+          <span id="val-fence-height">8 m</span>
+        </div>
+        <input type="range" id="range-height" min="2" max="25" value="8">
+      </div>
+
+      <div class="setting-group">
+        <div class="setting-label">
+          <span>Opacidad del Perímetro AR</span>
+          <span id="val-fence-opacity">60%</span>
+        </div>
+        <input type="range" id="range-opacity" min="10" max="100" value="60">
+      </div>
+
+      <div class="setting-group">
+        <div class="setting-label">
+          <span>Color Valla (Dentro)</span>
+        </div>
+        <input type="color" id="color-inside" class="setting-input" value="#00ff88">
+      </div>
+
+      <div class="setting-group">
+        <div class="setting-label">
+          <span>Color Valla (Fuera / Alerta)</span>
+        </div>
+        <input type="color" id="color-outside" class="setting-input" value="#ff3366">
+      </div>
+
+      <div class="setting-group">
+        <div class="setting-label">
+          <span>Vibración y Alertas Hópticas</span>
+        </div>
+        <button id="btn-toggle-haptic" class="btn-3d" style="background: rgba(0, 242, 254, 0.15); color: var(--accent-cyan); border: 1px solid var(--accent-cyan); box-shadow: none;">
+          ACTIVADO
+        </button>
+      </div>
+
+      <button id="btn-demo" class="btn-3d" style="background: linear-gradient(135deg, #11998e, #38ef7d);">
+        CARGAR RECINTO DEMO (TEST)
+      </button>
+    </div>
+  </div>
+
+  <!-- Screen Inicial de Permisos -->
+  <div id="permission-screen" class="permission-overlay">
+    <div class="permission-title">VALLA VIRTUAL AR</div>
+    <div class="permission-desc">
+      Esta aplicación requiere acceso a la <strong>Cámara Trasera</strong>, <strong>Sensor de Orientación (Brújula)</strong> y <strong>Ubicación GPS</strong> para renderizar los límites del recinto en Realidad Aumentada.
+    </div>
+    <button id="btn-start" class="btn-3d" style="width: 100%; max-width: 280px;">
+      INICIAR SISTEMA
+    </button>
+  </div>
+
+  <script>
+    /* Global Application State */
+    const state = {
+      userCoords: null, // {lat, lng, alt, accuracy}
+      heading: 0, // Grados respecto al Norte Magnético (0-360)
+      polygon: [], // Array de {lat, lng} del recinto cargado
+      isInside: false,
+      distanceToNearestEdge: 0,
+      config: {
+        fenceHeight: 8,
+        fenceOpacity: 0.6,
+        colorInside: '#00ff88',
+        colorOutside: '#ff3366',
+        haptics: true
+      }
+    };
+
+    /* Audio Context para Feedback Hóptico/Sonoro */
+    let audioCtx = null;
+
+    function playBeep(freq = 880, duration = 0.1) {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      try {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + duration);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + duration);
+      } catch (e) {}
+    }
+
+    function triggerHaptic(pattern = [100]) {
+      if (state.config.haptics && navigator.vibrate) {
+        navigator.vibrate(pattern);
+      }
+    }
+
+    /* Modulo de Inicialización y Cámara */
+    const video = document.getElementById('camera-feed');
+    const canvas = document.getElementById('ar-canvas');
+    const ctx = canvas.getContext('2d');
+
+    async function initCamera() {
+      try {
+        const constraints = {
+          video: {
+            facingMode: { exact: "environment" },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 }
+          }
+        };
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        video.srcObject = stream;
+      } catch (err) {
+        // Fallback a cualquier cámara trasera disponible
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+          video.srcObject = stream;
+        } catch (e) {
+          alert("No se pudo acceder a la cámara: " + e.message);
+        }
+      }
+    }
+
+    /* Redimensionar Canvas AR */
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    /* Brújula y Sensores de Orientación */
+    function initOrientation() {
+      const handleOrientation = (e) => {
+        let alpha = e.alpha;
+        let webkitHeading = e.webkitCompassHeading;
+
+        if (webkitHeading !== undefined) {
+          // iOS Safari
+          state.heading = webkitHeading;
+        } else if (alpha !== null) {
+          // Android Chrome (transformar alpha a brújula real)
+          state.heading = (360 - alpha) % 360;
+        }
+        updateCompassTape();
+        document.getElementById('heading-val').textContent = `${Math.round(state.heading).toString().padStart(3, '0')}°`;
+      };
+
+      if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+        DeviceOrientationEvent.requestPermission().then(response => {
+          if (response === 'granted') {
+            window.addEventListener('deviceorientation', handleOrientation, true);
+          }
+        });
+      } else {
+        window.addEventListener('deviceorientationabsolute', handleOrientation, true);
+        window.addEventListener('deviceorientation', handleOrientation, true);
+      }
+    }
+
+    /* Geolocalización GPS en Tiempo Real */
+    function initGPS() {
+      if (!navigator.geolocation) {
+        alert("Geolocalización no soportada en este navegador.");
+        return;
+      }
+
+      navigator.geolocation.watchPosition(
+        (pos) => {
+          state.userCoords = {
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            accuracy: pos.coords.accuracy
+          };
+
+          document.getElementById('gps-accuracy').textContent = `±${Math.round(pos.coords.accuracy)} m`;
+          checkPerimeterStatus();
+        },
+        (err) => {
+          console.warn("Error GPS:", err);
+          document.getElementById('status-text').textContent = "ERROR GPS";
+        },
+        {
+          enableHighAccuracy: true,
+          maximumAge: 1000,
+          timeout: 10000
+        }
+      );
+    }
+
+    /* Algoritmos Geográficos: Ray-Casting & Haversine */
+    
+    // Comprueba si un punto (Lat, Lng) está dentro de un Polígono
+    function isPointInPolygon(point, vs) {
+      let x = point.lat, y = point.lng;
+      let inside = false;
+      for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
+        let xi = vs[i].lat, yi = vs[i].lng;
+        let xj = vs[j].lat, yj = vs[j].lng;
+
+        let intersect = ((yi > y) !== (yj > y)) &&
+            (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+        if (intersect) inside = !inside;
+      }
+      return inside;
+    }
+
+    // Calcula Distancia (metros) y Bearing (grados) entre dos coordenadas GPS
+    function getDistanceAndBearing(lat1, lon1, lat2, lon2) {
+      const R = 6371000; // Radio Tierra en metros
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      const distance = R * c;
+
+      const y = Math.sin(dLon) * Math.cos(lat2 * Math.PI / 180);
+      const x = Math.cos(lat1 * Math.PI / 180) * Math.sin(lat2 * Math.PI / 180) -
+                Math.sin(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.cos(dLon);
+      let bearing = Math.atan2(y, x) * 180 / Math.PI;
+      bearing = (bearing + 360) % 360;
+
+      return { distance, bearing };
+    }
+
+    // Distancia mínima desde la ubicación al segmento/límite más cercano
+    function getDistanceToPerimeter(userLat, userLng, poly) {
+      if (poly.length < 2) return 0;
+      let minDistance = Infinity;
+
+      for (let i = 0; i < poly.length; i++) {
+        let p1 = poly[i];
+        let p2 = poly[(i + 1) % poly.length];
+        let d = getDistanceAndBearing(userLat, userLng, p1.lat, p1.lng).distance;
+        if (d < minDistance) minDistance = d;
+      }
+      return minDistance;
+    }
+
+    /* Verificación de Perímetro y Actualización de HUD */
+    function checkPerimeterStatus() {
+      if (!state.userCoords || state.polygon.length < 3) return;
+
+      const wasInside = state.isInside;
+      state.isInside = isPointInPolygon(state.userCoords, state.polygon);
+      state.distanceToNearestEdge = getDistanceToPerimeter(state.userCoords.lat, state.userCoords.lng, state.polygon);
+
+      const dot = document.getElementById('status-dot');
+      const statusText = document.getElementById('status-text');
+      const distVal = document.getElementById('dist-val');
+
+      distVal.textContent = `${Math.round(state.distanceToNearestEdge)} m`;
+
+      if (state.isInside) {
+        dot.className = 'status-dot inside';
+        statusText.textContent = 'DENTRO DEL RECINTO';
+        statusText.style.color = 'var(--alert-inside)';
+        if (!wasInside && wasInside !== false) {
+          playBeep(1200, 0.2);
+          triggerHaptic([100, 50, 100]);
+        }
+      } else {
+        dot.className = 'status-dot outside';
+        statusText.textContent = '¡FORA DEL PERÍMETRO!';
+        statusText.style.color = 'var(--alert-outside)';
+        if (wasInside) {
+          playBeep(400, 0.4);
+          triggerHaptic([300, 100, 300]);
+        }
+      }
+    }
+
+    /* Renderizador de Cinta de Brújula HUD */
+    function initCompassTape() {
+      const tape = document.getElementById('compass-tape');
+      const cardinales = { 0: 'N', 45: 'NE', 90: 'E', 135: 'SE', 180: 'S', 225: 'SO', 270: 'O', 315: 'NO' };
+      let html = '';
+
+      for (let deg = -180; deg <= 540; deg += 15) {
+        let normDeg = (deg + 360) % 360;
+        let label = cardinales[normDeg] !== undefined ? cardinales[normDeg] : normDeg;
+        let isMajor = cardinales[normDeg] !== undefined || normDeg % 30 === 0;
+        html += `<div class="compass-tick ${isMajor ? 'major' : ''}">${label}</div>`;
+      }
+      tape.innerHTML = html;
+    }
+    initCompassTape();
+
+    function updateCompassTape() {
+      const tape = document.getElementById('compass-tape');
+      // Cada tick son 40px por 15 grados -> 2.666px por grado
+      const pxPerDegree = 40 / 15;
+      const offset = -(state.heading * pxPerDegree) + (window.innerWidth / 2) - 20;
+      tape.style.transform = `translateX(${offset}px)`;
+    }
+
+    /* Motor de Renderizado AR Canvas 2D/3D */
+    function renderAR() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      if (state.userCoords && state.polygon.length >= 2) {
+        const cx = canvas.width / 2;
+        const cy = canvas.height / 2;
+        const fovHorizontal = 60; // Grados del campo de visión estimado de cámara móvil
+
+        const currentColor = state.isInside ? state.config.colorInside : state.config.colorOutside;
+        ctx.fillStyle = currentColor;
+        ctx.strokeStyle = currentColor;
+        ctx.lineWidth = 4;
+        ctx.globalAlpha = state.config.fenceOpacity;
+
+        // Renderizar cada segmento del perímetro en el espacio de la pantalla
+        for (let i = 0; i < state.polygon.length; i++) {
+          let p1 = state.polygon[i];
+          let p2 = state.polygon[(i + 1) % state.polygon.length];
+
+          let data1 = getDistanceAndBearing(state.userCoords.lat, state.userCoords.lng, p1.lat, p1.lng);
+          let data2 = getDistanceAndBearing(state.userCoords.lat, state.userCoords.lng, p2.lat, p2.lng);
+
+          // Proyectar vértices basándose en rumbo e ángulo relativo
+          let relAngle1 = (data1.bearing - state.heading + 540) % 360 - 180;
+          let relAngle2 = (data2.bearing - state.heading + 540) % 360 - 180;
+
+          // Solo renderizar si al menos un vértice está en frente del campo visual (-90 a 90 deg)
+          if (Math.abs(relAngle1) < 85 || Math.abs(relAngle2) < 85) {
+            let x1 = cx + (relAngle1 / (fovHorizontal / 2)) * cx;
+            let x2 = cx + (relAngle2 / (fovHorizontal / 2)) * cx;
+
+            // Escala de perspectiva por distancia (Z-index simulado)
+            let scale1 = Math.min(Math.max(100 / (data1.distance + 1), 0.1), 3);
+            let scale2 = Math.min(Math.max(100 / (data2.distance + 1), 0.1), 3);
+
+            let heightPx1 = state.config.fenceHeight * scale1 * 20;
+            let heightPx2 = state.config.fenceHeight * scale2 * 20;
+
+            let yBase1 = cy + (scale1 * 30);
+            let yBase2 = cy + (scale2 * 30);
+
+            // Dibujar la rejilla de la valla virtual
+            ctx.beginPath();
+            ctx.moveTo(x1, yBase1);
+            ctx.lineTo(x1, yBase1 - heightPx1);
+            ctx.lineTo(x2, yBase2 - heightPx2);
+            ctx.lineTo(x2, yBase2);
+            ctx.closePath();
+
+            // Relleno de la valla
+            let grad = ctx.createLinearGradient(0, yBase1 - heightPx1, 0, yBase1);
+            grad.addColorStop(0, currentColor);
+            grad.addColorStop(1, 'transparent');
+            ctx.fillStyle = grad;
+            ctx.fill();
+            ctx.stroke();
+
+            // Dibujar poste vertical indicador en el vértice
+            ctx.beginPath();
+            ctx.arc(x1, yBase1 - heightPx1, 6, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+      }
+
+      requestAnimationFrame(renderAR);
+    }
+
+    /* Parsers de Archivos KMZ y KML */
+    function parseKMLText(kmlText) {
+      const parser = new DOMParser();
+      const xmlDoc = parser.parseFromString(kmlText, "text/xml");
+      const coordinatesNodes = xmlDoc.getElementsByTagName("coordinates");
+
+      let parsedPolygon = [];
+
+      for (let i = 0; i < coordinatesNodes.length; i++) {
+        let text = coordinatesNodes[i].textContent.trim();
+        let tupleList = text.split(/\s+/);
+
+        tupleList.forEach(tuple => {
+          let parts = tuple.split(',');
+          if (parts.length >= 2) {
+            let lng = parseFloat(parts[0]);
+            let lat = parseFloat(parts[1]);
+            if (!isNaN(lat) && !isNaN(lng)) {
+              parsedPolygon.push({ lat, lng });
+            }
+          }
+        });
+        if (parsedPolygon.length >= 3) break; // Cargar el primer polígono cerrado válido
+      }
+
+      if (parsedPolygon.length >= 3) {
+        state.polygon = parsedPolygon;
+        document.getElementById('points-count').textContent = state.polygon.length;
+        localStorage.setItem('saved_polygon', JSON.stringify(state.polygon));
+        checkPerimeterStatus();
+        alert(`Recinto cargado con éxito. ${state.polygon.length} vértices detectados.`);
+      } else {
+        alert("No se pudieron encontrar coordenadas de polígono válidas en el archivo KML/KMZ.");
+      }
+    }
+
+    async function handleFileSelect(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const fileName = file.name.toLowerCase();
+
+      if (fileName.endsWith('.kmz')) {
+        try {
+          const zip = await JSZip.loadAsync(file);
+          let kmlFile = zip.file(/\.kml$/i)[0];
+          if (kmlFile) {
+            const kmlText = await kmlFile.async("string");
+            parseKMLText(kmlText);
+          } else {
+            alert("No se encontró ningún archivo .doc.kml dentro del paquete KMZ.");
+          }
+        } catch (err) {
+          alert("Error al descomprimir KMZ: " + err.message);
+        }
+      } else if (fileName.endsWith('.kml')) {
+        const reader = new FileReader();
+        reader.onload = (event) => parseKMLText(event.target.result);
+        reader.readAsText(file);
+      } else {
+        alert("Formato no soportado. Selecciona un archivo .KML o .KMZ");
+      }
+    }
+
+    /* Recinto Demo de Prueba al rededor de la posición del usuario */
+    function loadDemoPolygon() {
+      if (!state.userCoords) {
+        alert("Esperando señal GPS para generar el recinto de prueba alrededor de tu posición actual...");
+        return;
+      }
+      const lat = state.userCoords.lat;
+      const lng = state.userCoords.lng;
+      const offset = 0.0003; // ~30 metros alrededor
+
+      state.polygon = [
+        { lat: lat + offset, lng: lng - offset },
+        { lat: lat + offset, lng: lng + offset },
+        { lat: lat - offset, lng: lng + offset },
+        { lat: lat - offset, lng: lng - offset }
+      ];
+
+      document.getElementById('points-count').textContent = state.polygon.length;
+      localStorage.setItem('saved_polygon', JSON.stringify(state.polygon));
+      checkPerimeterStatus();
+      document.getElementById('modal-settings').classList.remove('active');
+      alert("Recinto Cuadrado de prueba (30m) cargado en tu ubicación actual.");
+    }
+
+    /* Event Listeners de la Interfaz y Configuración */
+    document.getElementById('btn-start').addEventListener('click', () => {
+      document.getElementById('permission-screen').style.display = 'none';
+      initCamera();
+      initOrientation();
+      initGPS();
+      requestAnimationFrame(renderAR);
+    });
+
+    document.getElementById('btn-load').addEventListener('click', () => {
+      document.getElementById('file-input').click();
+    });
+
+    document.getElementById('file-input').addEventListener('change', handleFileSelect);
+
+    const modal = document.getElementById('modal-settings');
+    document.getElementById('btn-config').addEventListener('click', () => modal.classList.add('active'));
+    document.getElementById('btn-close-modal').addEventListener('click', () => modal.classList.remove('active'));
+
+    // Bindings de Controles de Configuración
+    document.getElementById('range-height').addEventListener('input', (e) => {
+      state.config.fenceHeight = parseInt(e.target.value);
+      document.getElementById('val-fence-height').textContent = `${e.target.value} m`;
+    });
+
+    document.getElementById('range-opacity').addEventListener('input', (e) => {
+      state.config.fenceOpacity = parseInt(e.target.value) / 100;
+      document.getElementById('val-fence-opacity').textContent = `${e.target.value}%`;
+    });
+
+    document.getElementById('color-inside').addEventListener('input', (e) => {
+      state.config.colorInside = e.target.value;
+    });
+
+    document.getElementById('color-outside').addEventListener('input', (e) => {
+      state.config.colorOutside = e.target.value;
+    });
+
+    document.getElementById('btn-toggle-haptic').addEventListener('click', (e) => {
+      state.config.haptics = !state.config.haptics;
+      e.target.textContent = state.config.haptics ? 'ACTIVADO' : 'DESACTIVADO';
+      e.target.style.color = state.config.haptics ? 'var(--accent-cyan)' : '#888';
+    });
+
+    document.getElementById('btn-demo').addEventListener('click', loadDemoPolygon);
+
+    // Cargar polígono previo de LocalStorage si existe
+    const saved = localStorage.getItem('saved_polygon');
+    if (saved) {
+      try {
+        state.polygon = JSON.parse(saved);
+        document.getElementById('points-count').textContent = state.polygon.length;
+      } catch (e) {}
+    }
+  </script>
+</body>
+</html>
