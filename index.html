@@ -453,6 +453,56 @@
       line-height: 1.5;
     }
 
+    /* Controles del mapa */
+    .map-tools {
+      position: absolute;
+      right: 12px;
+      top: 150px;
+      z-index: 11;
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .map-tools.visible { display: flex; }
+    .tool-btn {
+      width: 46px;
+      height: 46px;
+      border-radius: 12px;
+      background: var(--panel-bg);
+      border: 1px solid rgba(0, 242, 254, 0.4);
+      color: var(--accent-cyan);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.4rem;
+      font-weight: 700;
+      box-shadow: 0 4px 0 #0a1124;
+      cursor: pointer;
+    }
+    .tool-btn:active { box-shadow: 0 0 0 #0a1124; }
+    .tool-btn.active { background: rgba(0, 242, 254, 0.25); }
+    #compass-svg { transform-origin: 50% 50%; transition: transform 0.15s linear; }
+
+    /* Selector segmentado (capas del mapa) */
+    .seg { display: flex; gap: 6px; }
+    .seg-btn {
+      flex: 1;
+      padding: 10px 4px;
+      border-radius: 10px;
+      border: 1px solid rgba(0, 242, 254, 0.3);
+      background: rgba(255, 255, 255, 0.04);
+      color: #e0e6ed;
+      font-weight: 700;
+      font-size: 0.75rem;
+      letter-spacing: 0.5px;
+      cursor: pointer;
+    }
+    .seg-btn.active {
+      background: rgba(0, 242, 254, 0.2);
+      border-color: var(--accent-cyan);
+      color: var(--accent-cyan);
+    }
+
     /* Ajustes para pantallas Android bajas o estrechas */
     @media (max-height: 680px) {
       .telemetry-value { font-size: 0.85rem; }
@@ -480,7 +530,23 @@
     <canvas id="ar-canvas"></canvas>
 
     <!-- Canvas de vista de mapa 2D -->
-    <canvas id="map-canvas"></canvas>
+    <canvas id="map-canvas" style="touch-action: none;"></canvas>
+
+    <!-- Controles del mapa 2D -->
+    <div id="map-tools" class="map-tools">
+      <button id="btn-compass" class="tool-btn" title="Norte / rumbo">
+        <svg id="compass-svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/>
+          <polygon points="12 3 15.5 12 12 10.5 8.5 12" fill="currentColor" stroke="none"/>
+          <polygon points="12 21 15.5 12 12 13.5 8.5 12"/>
+        </svg>
+      </button>
+      <button id="btn-recenter" class="tool-btn" title="Centrar en mi posición">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="7"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/></svg>
+      </button>
+      <button id="btn-zoom-in" class="tool-btn" title="Acercar">+</button>
+      <button id="btn-zoom-out" class="tool-btn" title="Alejar">&minus;</button>
+    </div>
 
     <!-- Top HUD Status -->
     <div class="hud-top">
@@ -592,6 +658,26 @@
         </button>
       </div>
 
+      <div class="setting-group">
+        <div class="setting-label">
+          <span>Mapa de fondo (vista 2D)</span>
+        </div>
+        <div class="seg">
+          <button class="seg-btn" data-layer="none">NINGUNO</button>
+          <button class="seg-btn" data-layer="ign">CALLEJERO</button>
+          <button class="seg-btn" data-layer="pnoa">PNOA</button>
+        </div>
+      </div>
+
+      <div class="setting-group">
+        <div class="setting-label">
+          <span>Nombres de recintos en AR</span>
+        </div>
+        <button id="btn-toggle-labels" class="btn-3d" style="background: rgba(0, 242, 254, 0.15); color: var(--accent-cyan); border: 1px solid var(--accent-cyan); box-shadow: none;">
+          ACTIVADO
+        </button>
+      </div>
+
       <button id="btn-demo" class="btn-3d" style="background: linear-gradient(135deg, #11998e, #38ef7d);">
         CARGAR RECINTO DEMO (TEST)
       </button>
@@ -630,13 +716,16 @@
       fallbackOrigin: null,      // centro de los recintos (para mapa sin GPS)
       isInside: false,
       distanceToNearestEdge: 0,
+      layer: 'none',             // mapa de fondo: 'none' | 'ign' (callejero) | 'pnoa'
+      map: { cLat: null, cLng: null, s: null, north: true, follow: true }, // s = píxeles por metro
       config: {
         fenceHeight: 8,          // m
         wallThickness: 0.2,      // m
         fenceOpacity: 0.6,
         colorInside: '#00ff88',
         colorOutside: '#ff3366',
-        haptics: true
+        haptics: true,
+        showLabels: true         // nombres de recintos en AR
       }
     };
     state.rot = eulerToRot(0, 90, 0); // por defecto: móvil vertical mirando al Norte
@@ -1095,11 +1184,183 @@
           ctx.fill();
         }
       }
+
+      // Nombres de recintos flotando sobre cada valla
+      if (state.config.showLabels) {
+        for (const p of polys) {
+          let mx = 0, my = 0;
+          for (const q of p.pts) { mx += q.x; my += q.y; }
+          mx /= p.pts.length; my /= p.pts.length;
+          const d = toDevice(rot, mx, my, zt + 0.8);
+          const depth = -d[2];
+          if (depth < NEAR) continue;
+          const lx = cx + f * d[0] / depth, ly = cy - f * d[1] / depth;
+          const size = Math.round(Math.min(Math.max(f * 0.9 / depth, 11), 30));
+          ctx.font = `700 ${size}px sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = 'rgba(11,19,43,0.85)';
+          ctx.strokeText(p.name, lx, ly);
+          ctx.fillStyle = '#e0e6ed';
+          ctx.fillText(p.name, lx, ly);
+          ctx.textAlign = 'start';
+        }
+      }
     }
 
-    /* ===================== Render vista de mapa 2D ===================== */
+    /* ===================== Mapa 2D: pan, zoom, rotación y capas ===================== */
+    const MAP_TOP = 150, MAP_BOTTOM = 200, MAP_SIDE = 30;
+    // Servicios WMTS del IGN (gratuitos). Mercator (GoogleMapsCompatible)
+    const TILE_SRC = {
+      ign: (z, x, y) => `https://www.ign.es/wmts/ign-base?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=IGNBaseTodo&STYLE=default&TILEMATRIXSET=GoogleMapsCompatible&TILEMATRIX=${z}&TILEROW=${y}&TILECOL=${x}&FORMAT=image/jpeg`,
+      pnoa: (z, x, y) => `https://www.ign.es/wmts/pnoa-ma?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=OI.OrthoimageCoverage&STYLE=default&TILEMATRIXSET=GoogleMapsCompatible&TILEMATRIX=${z}&TILEROW=${y}&TILECOL=${x}&FORMAT=image/jpeg`
+    };
+    const tileCache = new Map();
+
+    function getTile(layer, z, x, y) {
+      const key = `${layer}/${z}/${x}/${y}`;
+      let img = tileCache.get(key);
+      if (!img) {
+        img = new Image();
+        img.src = TILE_SRC[layer](z, x, y);
+        tileCache.set(key, img);
+        if (tileCache.size > 500) tileCache.delete(tileCache.keys().next().value);
+      }
+      return img;
+    }
+
+    // Centro de la zona útil del mapa (entre la cabecera y los botones)
+    function mapCenterPx(W, H) {
+      return { x: W / 2, y: MAP_TOP + (H - MAP_TOP - MAP_BOTTOM) / 2 };
+    }
+
+    // Giro del mapa: 0 = norte arriba; en modo rumbo, el rumbo del móvil apunta arriba
+    function mapRot() {
+      return state.map.north ? 0 : state.heading * D2R;
+    }
+
+    function enuToScreen(X, Y, W, H) {
+      const m = state.map, cp = mapCenterPx(W, H);
+      const c = Math.cos(mapRot()), sn = Math.sin(mapRot());
+      return { x: cp.x + m.s * (X * c - Y * sn), y: cp.y - m.s * (X * sn + Y * c) };
+    }
+
+    function latLngToScreen(lat, lng, W, H) {
+      const m = state.map;
+      const e = enuOf(lat, lng, { lat: m.cLat, lng: m.cLng });
+      return enuToScreen(e.x, e.y, W, H);
+    }
+
+    function screenToLatLng(sx, sy, W, H) {
+      const m = state.map, cp = mapCenterPx(W, H);
+      const c = Math.cos(mapRot()), sn = Math.sin(mapRot());
+      const X1 = (sx - cp.x) / m.s, Y1 = (cp.y - sy) / m.s;
+      const X = X1 * c + Y1 * sn, Y = -X1 * sn + Y1 * c;
+      const k = D2R * R_EARTH;
+      return { lat: m.cLat + Y / k, lng: m.cLng + X / (k * Math.cos(m.cLat * D2R)) };
+    }
+
+    // Desplaza el mapa con el dedo (el contenido sigue al dedo)
+    function panByPx(dx, dy) {
+      const m = state.map;
+      const c = Math.cos(mapRot()), sn = Math.sin(mapRot());
+      const X1 = dx / m.s, Y1 = -dy / m.s;
+      const X = X1 * c + Y1 * sn, Y = -X1 * sn + Y1 * c;
+      const k = D2R * R_EARTH;
+      m.cLat -= Y / k;
+      m.cLng -= X / (k * Math.cos(m.cLat * D2R));
+      m.follow = false;
+    }
+
+    function zoomBy(f) {
+      state.map.s = Math.min(5000, Math.max(0.02, state.map.s * f));
+    }
+
+    // Encuadra todos los recintos
+    function fitMap(W, H) {
+      const pts = [];
+      for (const p of state.polygons) for (const q of p.points) pts.push(q);
+      if (!pts.length) return;
+      let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
+      for (const q of pts) {
+        minLat = Math.min(minLat, q.lat); maxLat = Math.max(maxLat, q.lat);
+        minLng = Math.min(minLng, q.lng); maxLng = Math.max(maxLng, q.lng);
+      }
+      const cLat = (minLat + maxLat) / 2, cLng = (minLng + maxLng) / 2;
+      let R = 1;
+      for (const q of pts) {
+        const e = enuOf(q.lat, q.lng, { lat: cLat, lng: cLng });
+        R = Math.max(R, Math.hypot(e.x, e.y));
+      }
+      const availW = W - 2 * MAP_SIDE, availH = H - MAP_TOP - MAP_BOTTOM;
+      state.map.cLat = cLat;
+      state.map.cLng = cLng;
+      state.map.s = Math.min(availW, availH) / (2 * R);
+    }
+
+    // Icono de brújula: la N apunta siempre al norte real
+    function updateCompassIcon() {
+      document.getElementById('compass-svg').style.transform = `rotate(${-mapRot() / D2R}deg)`;
+      document.getElementById('btn-compass').classList.toggle('active', !state.map.north);
+    }
+
+    // Mapa de fondo WMTS (Mercator), dibujado con transformación afín por teselas
+    function drawTiles(W, H) {
+      const m = state.map;
+      const corners = [[0, 0], [W, 0], [0, H], [W, H]].map(([x, y]) => screenToLatLng(x, y, W, H));
+      let z = Math.round(Math.log2(156543.03392 * Math.cos(m.cLat * D2R) * m.s));
+      z = Math.max(5, Math.min(19, z));
+      const n = Math.pow(2, z);
+      const lngToX = lng => (lng + 180) / 360 * n;
+      const latToY = lat => { const r = lat * D2R; return (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n; };
+      const xToLng = x => x / n * 360 - 180;
+      const yToLat = y => Math.atan(Math.sinh(Math.PI * (1 - 2 * y / n))) / D2R;
+
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      for (const c of corners) {
+        minX = Math.min(minX, lngToX(c.lng)); maxX = Math.max(maxX, lngToX(c.lng));
+        minY = Math.min(minY, latToY(c.lat)); maxY = Math.max(maxY, latToY(c.lat));
+      }
+      const x0 = Math.floor(minX), x1 = Math.floor(maxX);
+      const y0 = Math.max(0, Math.floor(minY)), y1 = Math.min(n - 1, Math.floor(maxY));
+
+      for (let tx = x0; tx <= x1; tx++) {
+        for (let ty = y0; ty <= y1; ty++) {
+          const img = getTile(m.layer || state.layer, z, ((tx % n) + n) % n, ty);
+          if (!img.complete || !img.naturalWidth) continue;
+          const TL = latLngToScreen(yToLat(ty), xToLng(tx), W, H);
+          const TR = latLngToScreen(yToLat(ty), xToLng(tx + 1), W, H);
+          const BL = latLngToScreen(yToLat(ty + 1), xToLng(tx), W, H);
+          mctx.save();
+          mctx.setTransform((TR.x - TL.x) / 256, (TR.y - TL.y) / 256, (BL.x - TL.x) / 256, (BL.y - TL.y) / 256, TL.x, TL.y);
+          mctx.drawImage(img, 0, 0, 256, 256);
+          mctx.restore();
+        }
+      }
+    }
+
+    function drawGrid(W, H) {
+      const m = state.map;
+      const raw = 90 / m.s;
+      const steps = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000];
+      const step = steps.find(v => v >= raw) || 5000;
+      const R = Math.hypot(W, H) / (2 * m.s);
+      mctx.strokeStyle = 'rgba(0,242,254,0.10)';
+      mctx.lineWidth = 1;
+      mctx.beginPath();
+      for (let v = Math.floor(-R / step) * step; v <= R; v += step) {
+        let a = enuToScreen(v, -R, W, H), b = enuToScreen(v, R, W, H);
+        mctx.moveTo(a.x, a.y); mctx.lineTo(b.x, b.y);
+        a = enuToScreen(-R, v, W, H); b = enuToScreen(R, v, W, H);
+        mctx.moveTo(a.x, a.y); mctx.lineTo(b.x, b.y);
+      }
+      mctx.stroke();
+    }
+
     function drawMap() {
       const W = mapCanvas.width, H = mapCanvas.height;
+      const m = state.map;
+      updateCompassIcon();
       mctx.fillStyle = '#0b132b';
       mctx.fillRect(0, 0, W, H);
 
@@ -1112,48 +1373,24 @@
         return;
       }
 
-      const origin = state.userCoords || state.fallbackOrigin;
-      const polys = polygonsENU(origin);
-
-      // Límites (incluyendo al usuario en el origen)
-      let minX = -10, maxX = 10, minY = -10, maxY = 10;
-      for (const p of polys) for (const q of p.pts) {
-        if (q.x < minX) minX = q.x; if (q.x > maxX) maxX = q.x;
-        if (q.y < minY) minY = q.y; if (q.y > maxY) maxY = q.y;
+      if (m.s == null) fitMap(W, H);
+      if (m.follow) {
+        const o = state.userCoords || state.fallbackOrigin;
+        m.cLat = o.lat;
+        m.cLng = o.lng;
       }
-      const bw = maxX - minX, bh = maxY - minY;
-      const top = 150, bottom = 200, side = 30;
-      const availW = W - 2 * side, availH = H - top - bottom;
-      const s = Math.min(availW / bw, availH / bh);          // píxeles por metro
-      const cxm = (minX + maxX) / 2, cym = (minY + maxY) / 2;
-      const ox = W / 2, oy = top + availH / 2;
-      const toS = (x, y) => ({ x: ox + (x - cxm) * s, y: oy - (y - cym) * s });
 
-      // Rejilla de referencia
-      const raw = 90 / s;
-      const steps = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000];
-      const step = steps.find(v => v >= raw) || 5000;
-      const vx0 = cxm - (W / 2) / s, vx1 = cxm + (W / 2) / s;
-      const vy0 = cym - (H / 2) / s, vy1 = cym + (H / 2) / s;
-      mctx.strokeStyle = 'rgba(0,242,254,0.08)';
-      mctx.lineWidth = 1;
-      mctx.beginPath();
-      for (let x = Math.ceil(vx0 / step) * step; x <= vx1; x += step) {
-        const p = toS(x, 0); mctx.moveTo(p.x, 0); mctx.lineTo(p.x, H);
-      }
-      for (let y = Math.ceil(vy0 / step) * step; y <= vy1; y += step) {
-        const p = toS(0, y); mctx.moveTo(0, p.y); mctx.lineTo(W, p.y);
-      }
-      mctx.stroke();
+      if (state.layer !== 'none') drawTiles(W, H);
+      drawGrid(W, H);
 
-      // Recintos
-      for (const p of polys) {
+      // Recintos con su nombre
+      for (const p of state.polygons) {
         mctx.beginPath();
-        let sx = 0, sy = 0;
-        p.pts.forEach((q, i) => {
-          const sp = toS(q.x, q.y);
+        let sLat = 0, sLng = 0;
+        p.points.forEach((q, i) => {
+          const sp = latLngToScreen(q.lat, q.lng, W, H);
           i ? mctx.lineTo(sp.x, sp.y) : mctx.moveTo(sp.x, sp.y);
-          sx += sp.x; sy += sp.y;
+          sLat += q.lat; sLng += q.lng;
         });
         mctx.closePath();
         mctx.fillStyle = 'rgba(0,242,254,0.16)';
@@ -1162,22 +1399,22 @@
         mctx.lineWidth = 2.5;
         mctx.stroke();
 
-        // Nombre del recinto
-        const n = p.pts.length;
+        const n = p.points.length;
+        const lp = latLngToScreen(sLat / n, sLng / n, W, H);
         mctx.font = '700 13px sans-serif';
         mctx.textAlign = 'center';
         mctx.lineWidth = 3;
         mctx.strokeStyle = 'rgba(11,19,43,0.9)';
-        mctx.strokeText(p.name, sx / n, sy / n);
+        mctx.strokeText(p.name, lp.x, lp.y);
         mctx.fillStyle = '#e0e6ed';
-        mctx.fillText(p.name, sx / n, sy / n);
+        mctx.fillText(p.name, lp.x, lp.y);
         mctx.textAlign = 'start';
       }
 
-      // Usuario y cono de visión
+      // Usuario y cono de visión (el cono gira con el mapa)
       if (state.userCoords) {
-        const u = toS(0, 0);
-        const accR = Math.min(Math.max((state.userCoords.accuracy || 0) * s, 6), 200);
+        const u = latLngToScreen(state.userCoords.lat, state.userCoords.lng, W, H);
+        const accR = Math.min(Math.max((state.userCoords.accuracy || 0) * m.s, 6), 200);
         mctx.beginPath();
         mctx.arc(u.x, u.y, accR, 0, Math.PI * 2);
         mctx.fillStyle = 'rgba(79,172,254,0.15)';
@@ -1187,11 +1424,14 @@
         mctx.stroke();
 
         const h = state.heading * D2R;
+        const c = Math.cos(mapRot()), sn = Math.sin(mapRot());
         mctx.beginPath();
         mctx.moveTo(u.x, u.y);
         for (const da of [-30, 30]) {
           const a = h + da * D2R;
-          mctx.lineTo(u.x + Math.sin(a) * 80, u.y - Math.cos(a) * 80);
+          const ex = Math.sin(a), ey = Math.cos(a);          // dirección en ENU
+          const px = ex * c - ey * sn, py = -(ex * sn + ey * c); // a pantalla
+          mctx.lineTo(u.x + px * 80, u.y + py * 80);
         }
         mctx.closePath();
         mctx.fillStyle = 'rgba(0,242,254,0.25)';
@@ -1205,21 +1445,79 @@
         mctx.strokeStyle = '#ffffff';
         mctx.stroke();
       }
-
-      // Indicador de norte
-      const nx = W - 28, ny = top;
-      mctx.beginPath();
-      mctx.moveTo(nx, ny - 14);
-      mctx.lineTo(nx - 7, ny + 4);
-      mctx.lineTo(nx + 7, ny + 4);
-      mctx.closePath();
-      mctx.fillStyle = '#00f2fe';
-      mctx.fill();
-      mctx.font = '700 13px sans-serif';
-      mctx.textAlign = 'center';
-      mctx.fillText('N', nx, ny + 19);
-      mctx.textAlign = 'start';
     }
+
+    // Gestos: arrastrar (pan), pellizcar (zoom) y rueda del ratón
+    const activePointers = new Map();
+    let pinchDist = null;
+    mapCanvas.addEventListener('pointerdown', (e) => {
+      if (state.view !== 'map') return;
+      mapCanvas.setPointerCapture(e.pointerId);
+      activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (activePointers.size === 2) {
+        const [a, b] = [...activePointers.values()];
+        pinchDist = Math.hypot(a.x - b.x, a.y - b.y);
+      }
+    });
+    mapCanvas.addEventListener('pointermove', (e) => {
+      if (!activePointers.has(e.pointerId)) return;
+      const prev = activePointers.get(e.pointerId);
+      activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (activePointers.size === 1) {
+        panByPx(e.clientX - prev.x, e.clientY - prev.y);
+      } else if (activePointers.size === 2) {
+        const [a, b] = [...activePointers.values()];
+        const d = Math.hypot(a.x - b.x, a.y - b.y);
+        if (pinchDist > 0) zoomBy(d / pinchDist);
+        pinchDist = d;
+      }
+    });
+    const endPointer = (e) => {
+      activePointers.delete(e.pointerId);
+      if (activePointers.size < 2) pinchDist = null;
+    };
+    mapCanvas.addEventListener('pointerup', endPointer);
+    mapCanvas.addEventListener('pointercancel', endPointer);
+    mapCanvas.addEventListener('wheel', (e) => {
+      if (state.view !== 'map') return;
+      e.preventDefault();
+      zoomBy(Math.exp(-e.deltaY * 0.0015));
+    }, { passive: false });
+
+    // Botones del mapa
+    document.getElementById('btn-compass').addEventListener('click', () => {
+      state.map.north = !state.map.north;
+      updateCompassIcon();
+    });
+    document.getElementById('btn-recenter').addEventListener('click', () => {
+      state.map.follow = true;
+    });
+    document.getElementById('btn-zoom-in').addEventListener('click', () => zoomBy(1.6));
+    document.getElementById('btn-zoom-out').addEventListener('click', () => zoomBy(1 / 1.6));
+
+    // Capa de fondo: ninguno / callejero / PNOA
+    function setLayer(l) {
+      state.layer = l;
+      try { localStorage.setItem('map_layer', l); } catch (e) {}
+      updateLayerButtons();
+    }
+    function updateLayerButtons() {
+      document.querySelectorAll('.seg-btn').forEach(b => b.classList.toggle('active', b.dataset.layer === state.layer));
+    }
+    document.querySelectorAll('.seg-btn').forEach(b => b.addEventListener('click', () => setLayer(b.dataset.layer)));
+    try {
+      const saved = localStorage.getItem('map_layer');
+      if (saved === 'none' || saved === 'ign' || saved === 'pnoa') state.layer = saved;
+    } catch (e) {}
+    updateLayerButtons();
+
+    // Nombres de recintos en AR
+    const btnLabels = document.getElementById('btn-toggle-labels');
+    btnLabels.addEventListener('click', () => {
+      state.config.showLabels = !state.config.showLabels;
+      btnLabels.textContent = state.config.showLabels ? 'ACTIVADO' : 'DESACTIVADO';
+      btnLabels.style.color = state.config.showLabels ? 'var(--accent-cyan)' : '#888';
+    });
 
     /* Bucle de render: solo dibuja la vista activa */
     let loopStarted = false;
@@ -1239,6 +1537,10 @@
 
       document.getElementById('icon-view').innerHTML = isAR ? ICON_MAP : ICON_CAM;
       document.getElementById('label-view').textContent = isAR ? 'MAPA' : 'AR';
+
+      // En modo mapa: se activan los gestos y los controles del mapa
+      mapCanvas.style.pointerEvents = isAR ? 'none' : 'auto';
+      document.getElementById('map-tools').classList.toggle('visible', !isAR);
     }
     document.getElementById('btn-view').addEventListener('click', () => {
       setView(state.view === 'ar' ? 'map' : 'ar');
@@ -1264,6 +1566,8 @@
 
     function setPolygons(polys, silent) {
       state.polygons = polys;
+      state.map.s = null;      // reencuadrar el mapa con los nuevos recintos
+      state.map.follow = true;
 
       // Centro de todos los recintos (para ver el mapa sin GPS)
       let sLat = 0, sLng = 0, n = 0;
