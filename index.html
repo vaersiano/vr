@@ -35,22 +35,23 @@
       user-select: none;
       -webkit-user-select: none;
       touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
     }
 
-    body, html {
+    html, body {
       width: 100%;
       height: 100%;
       overflow: hidden;
+      overscroll-behavior: none;
       background-color: #000;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       color: var(--text-light);
     }
 
-    /* Contenedor Principal AR */
+    /* Contenedor Principal AR (ocupa la pantalla real, también con la barra del navegador de Android) */
     #app-container {
-      position: relative;
-      width: 100vw;
-      height: 100vh;
+      position: fixed;
+      inset: 0;
       overflow: hidden;
     }
 
@@ -76,16 +77,29 @@
       pointer-events: none;
     }
 
+    /* Canvas de Vista de Mapa 2D */
+    #map-canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+      display: none;
+      pointer-events: none;
+    }
+
     /* Interfaz Superior - Status HUD */
     .hud-top {
       position: absolute;
-      top: 15px;
+      top: calc(15px + env(safe-area-inset-top, 0px));
       left: 15px;
       right: 15px;
       z-index: 10;
       display: flex;
       flex-direction: column;
       gap: 10px;
+      pointer-events: none;
     }
 
     .status-bar {
@@ -109,9 +123,17 @@
       font-size: 0.9rem;
       letter-spacing: 0.5px;
       text-transform: uppercase;
+      min-width: 0;
+    }
+
+    .status-badge span {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .status-dot {
+      flex: 0 0 auto;
       width: 12px;
       height: 12px;
       border-radius: 50%;
@@ -199,7 +221,7 @@
     /* Interfaz Inferior - Botones y Datos */
     .hud-bottom {
       position: absolute;
-      bottom: 25px;
+      bottom: calc(22px + env(safe-area-inset-bottom, 0px));
       left: 15px;
       right: 15px;
       z-index: 10;
@@ -219,14 +241,18 @@
       backdrop-filter: blur(8px);
       border: 1px solid rgba(255, 255, 255, 0.1);
       border-radius: 12px;
-      padding: 8px;
+      padding: 8px 4px;
       text-align: center;
+      min-width: 0;
     }
 
     .telemetry-label {
       font-size: 0.65rem;
       color: rgba(255, 255, 255, 0.6);
       text-transform: uppercase;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .telemetry-value {
@@ -234,11 +260,13 @@
       font-weight: bold;
       color: var(--accent-cyan);
       margin-top: 2px;
+      white-space: nowrap;
     }
 
     .controls-row {
       display: flex;
       gap: 10px;
+      align-items: stretch;
     }
 
     /* Botones 3D Estilo Futurista */
@@ -260,6 +288,7 @@
       transition: all 0.1s ease;
       text-transform: uppercase;
       letter-spacing: 0.5px;
+      white-space: nowrap;
     }
 
     .btn-3d:active {
@@ -276,6 +305,23 @@
     }
 
     .btn-icon-only:active {
+      box-shadow: 0 0 0 #0a1124;
+    }
+
+    .btn-view {
+      flex: 0 0 auto;
+      min-width: 74px;
+      flex-direction: column;
+      gap: 3px;
+      padding: 8px 10px;
+      font-size: 0.7rem;
+      background: var(--panel-bg);
+      border: 1px solid rgba(0, 242, 254, 0.4);
+      color: var(--accent-cyan);
+      box-shadow: 0 4px 0 #0a1124;
+    }
+
+    .btn-view:active {
       box-shadow: 0 0 0 #0a1124;
     }
 
@@ -311,7 +357,9 @@
       width: 100%;
       max-width: 420px;
       max-height: 85vh;
+      max-height: 85dvh;
       overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
       padding: 24px;
       box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8);
       display: flex;
@@ -339,6 +387,7 @@
       color: #888;
       font-size: 1.5rem;
       cursor: pointer;
+      padding: 0 6px;
     }
 
     .setting-group {
@@ -366,6 +415,7 @@
 
     input[type="range"] {
       accent-color: var(--accent-cyan);
+      width: 100%;
     }
 
     /* Ocultar input file real */
@@ -402,6 +452,22 @@
       color: rgba(255, 255, 255, 0.7);
       line-height: 1.5;
     }
+
+    /* Ajustes para pantallas Android bajas o estrechas */
+    @media (max-height: 680px) {
+      .telemetry-value { font-size: 0.85rem; }
+      .telemetry-card { padding: 6px 4px; }
+      .status-bar { padding: 9px 14px; }
+      .btn-3d { padding: 12px 8px; }
+    }
+
+    @media (max-width: 380px) {
+      .btn-3d { font-size: 0.75rem; letter-spacing: 0; gap: 6px; padding: 12px 6px; }
+      .btn-view { min-width: 64px; font-size: 0.62rem; padding: 8px 6px; }
+      .btn-icon-only { flex-basis: 46px; }
+      .status-badge { font-size: 0.8rem; }
+      .telemetry-label { font-size: 0.6rem; }
+    }
   </style>
 </head>
 <body>
@@ -409,9 +475,12 @@
   <div id="app-container">
     <!-- Stream de Cámara -->
     <video id="camera-feed" autoplay playsinline muted></video>
-    
-    <!-- Canvas 2D/3D de Realidad Aumentada -->
+
+    <!-- Canvas de Realidad Aumentada (3D sobre la cámara) -->
     <canvas id="ar-canvas"></canvas>
+
+    <!-- Canvas de vista de mapa 2D -->
+    <canvas id="map-canvas"></canvas>
 
     <!-- Top HUD Status -->
     <div class="hud-top">
@@ -455,6 +524,10 @@
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
           CARGAR KMZ / KML
         </button>
+        <button id="btn-view" class="btn-3d btn-view">
+          <svg id="icon-view" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"></svg>
+          <span id="label-view">MAPA</span>
+        </button>
         <button id="btn-config" class="btn-3d btn-icon-only">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         </button>
@@ -478,6 +551,14 @@
           <span id="val-fence-height">8 m</span>
         </div>
         <input type="range" id="range-height" min="2" max="25" value="8">
+      </div>
+
+      <div class="setting-group">
+        <div class="setting-label">
+          <span>Grosor de la Pared</span>
+          <span id="val-fence-thickness">20 cm</span>
+        </div>
+        <input type="range" id="range-thickness" min="5" max="100" step="5" value="20">
       </div>
 
       <div class="setting-group">
@@ -521,7 +602,7 @@
   <div id="permission-screen" class="permission-overlay">
     <div class="permission-title">VALLA VIRTUAL AR</div>
     <div class="permission-desc">
-      Esta aplicación requiere acceso a la <strong>Cámara Trasera</strong>, <strong>Sensor de Orientación (Brújula)</strong> y <strong>Ubicación GPS</strong> para renderizar los límites del recinto en Realidad Aumentada.
+      Esta aplicación requiere acceso a la <strong>Cámara Trasera</strong>, <strong>Sensor de Orientación (Giroscopio y Brújula)</strong> y <strong>Ubicación GPS</strong> para renderizar los límites del recinto en Realidad Aumentada.
     </div>
     <button id="btn-start" class="btn-3d" style="width: 100%; max-width: 280px;">
       INICIAR SISTEMA
@@ -529,28 +610,43 @@
   </div>
 
   <script>
-    /* Global Application State */
+    /* ===================== Constantes ===================== */
+    const D2R = Math.PI / 180;
+    const R_EARTH = 6371000;      // m
+    const CAM_HEIGHT = 1.5;       // altura estimada del móvil sobre el suelo (m)
+    const NEAR = 0.3;             // plano de recorte cercano (m)
+    const HFOV = 60;              // campo de visión horizontal de la cámara (grados)
+    const ICON_MAP = '<polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/>';
+    const ICON_CAM = '<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>';
+
+    /* ===================== Estado Global ===================== */
     const state = {
-      userCoords: null, // {lat, lng, alt, accuracy}
-      heading: 0, // Grados respecto al Norte Magnético (0-360)
-      polygon: [], // Array de {lat, lng} del recinto cargado
+      userCoords: null,          // {lat, lng, accuracy}
+      heading: 0,                // rumbo de la cámara (0-360, respecto al Norte)
+      rot: null,                 // matriz 3x3 (row-major) dispositivo -> ENU (Este, Norte, Arriba)
+      orientReady: false,
+      view: 'ar',                // 'ar' | 'map'
+      polygons: [],              // [{name, points:[{lat,lng}]}]
+      fallbackOrigin: null,      // centro de los recintos (para mapa sin GPS)
       isInside: false,
       distanceToNearestEdge: 0,
       config: {
-        fenceHeight: 8,
+        fenceHeight: 8,          // m
+        wallThickness: 0.2,      // m
         fenceOpacity: 0.6,
         colorInside: '#00ff88',
         colorOutside: '#ff3366',
         haptics: true
       }
     };
+    state.rot = eulerToRot(0, 90, 0); // por defecto: móvil vertical mirando al Norte
 
-    /* Audio Context para Feedback Hóptico/Sonoro */
+    /* ===================== Utilidades de sonido/vibración ===================== */
     let audioCtx = null;
 
     function playBeep(freq = 880, duration = 0.1) {
-      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       try {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
         osc.type = 'sine';
@@ -570,10 +666,82 @@
       }
     }
 
-    /* Modulo de Inicialización y Cámara */
+    /* ===================== Matemática 3D (orientación) ===================== */
+    // Multiplicación de matrices 3x3 (row-major)
+    function mul(a, b) {
+      const o = new Array(9);
+      for (let r = 0; r < 3; r++) {
+        for (let c = 0; c < 3; c++) {
+          o[r * 3 + c] = a[r * 3] * b[c] + a[r * 3 + 1] * b[3 + c] + a[r * 3 + 2] * b[6 + c];
+        }
+      }
+      return o;
+    }
+
+    // Ángulos W3C (alpha, beta, gamma) -> matriz dispositivo->Tierra: Rz(alpha)·Rx(beta)·Ry(gamma)
+    function eulerToRot(alphaDeg, betaDeg, gammaDeg) {
+      const A = alphaDeg * D2R, B = betaDeg * D2R, G = gammaDeg * D2R;
+      const ca = Math.cos(A), sa = Math.sin(A);
+      const cb = Math.cos(B), sb = Math.sin(B);
+      const cg = Math.cos(G), sg = Math.sin(G);
+      const Rz = [ca, -sa, 0,  sa, ca, 0,  0, 0, 1];
+      const Rx = [1, 0, 0,  0, cb, -sb,  0, sb, cb];
+      const Ry = [cg, 0, sg,  0, 1, 0,  -sg, 0, cg];
+      return mul(mul(Rz, Rx), Ry);
+    }
+
+    // Pasa un punto del mundo (ENU, cámara en el origen) a coordenadas del dispositivo: R^T · p
+    function toDevice(rot, x, y, z) {
+      return [
+        rot[0] * x + rot[3] * y + rot[6] * z,
+        rot[1] * x + rot[4] * y + rot[7] * z,
+        rot[2] * x + rot[5] * y + rot[8] * z
+      ];
+    }
+
+    // Convierte lat/lng a metros ENU respecto a un origen
+    function enuOf(lat, lng, o) {
+      const k = D2R * R_EARTH;
+      return {
+        x: (lng - o.lng) * k * Math.cos(o.lat * D2R),
+        y: (lat - o.lat) * k
+      };
+    }
+
+    function polygonsENU(origin) {
+      return state.polygons.map(p => ({
+        name: p.name,
+        pts: p.points.map(q => enuOf(q.lat, q.lng, origin))
+      }));
+    }
+
+    // Distancia de un punto a un segmento (2D, metros)
+    function distToSegment(px, py, ax, ay, bx, by) {
+      const dx = bx - ax, dy = by - ay;
+      const L2 = dx * dx + dy * dy;
+      let t = L2 > 0 ? ((px - ax) * dx + (py - ay) * dy) / L2 : 0;
+      t = Math.max(0, Math.min(1, t));
+      return Math.hypot(ax + t * dx - px, ay + t * dy - py);
+    }
+
+    // Colores: k>0 aclara hacia blanco, k<0 oscurece
+    function hexRgb(hex) {
+      const n = parseInt(hex.slice(1), 16);
+      return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+    }
+    function colorStr(hex, alpha, k = 0) {
+      let [r, g, b] = hexRgb(hex);
+      if (k > 0) { r += (255 - r) * k; g += (255 - g) * k; b += (255 - b) * k; }
+      else if (k < 0) { r *= 1 + k; g *= 1 + k; b *= 1 + k; }
+      return `rgba(${Math.round(r)},${Math.round(g)},${Math.round(b)},${alpha})`;
+    }
+
+    /* ===================== Cámara ===================== */
     const video = document.getElementById('camera-feed');
     const canvas = document.getElementById('ar-canvas');
     const ctx = canvas.getContext('2d');
+    const mapCanvas = document.getElementById('map-canvas');
+    const mctx = mapCanvas.getContext('2d');
 
     async function initCamera() {
       try {
@@ -597,44 +765,78 @@
       }
     }
 
-    /* Redimensionar Canvas AR */
+    /* Redimensionar canvas (pantalla real del dispositivo) */
     function resizeCanvas() {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
+      const w = window.innerWidth, h = window.innerHeight;
+      canvas.width = w;
+      canvas.height = h;
+      mapCanvas.width = w;
+      mapCanvas.height = h;
+      updateCompassTape();
     }
     window.addEventListener('resize', resizeCanvas);
     resizeCanvas();
 
-    /* Brújula y Sensores de Orientación */
-    function initOrientation() {
-      const handleOrientation = (e) => {
-        let alpha = e.alpha;
-        let webkitHeading = e.webkitCompassHeading;
+    /* ===================== Orientación (giroscopio + brújula) ===================== */
+    let absoluteSeen = false;
 
-        if (webkitHeading !== undefined) {
-          // iOS Safari
-          state.heading = webkitHeading;
-        } else if (alpha !== null) {
-          // Android Chrome (transformar alpha a brújula real)
-          state.heading = (360 - alpha) % 360;
-        }
-        updateCompassTape();
-        document.getElementById('heading-val').textContent = `${Math.round(state.heading).toString().padStart(3, '0')}°`;
-      };
+    function handleOrientation(e, isAbsolute) {
+      // En Android, si ya llega la orientación absoluta (con brújula), ignoramos la relativa
+      if (isAbsolute) absoluteSeen = true;
+      else if (absoluteSeen) return;
 
-      if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-        DeviceOrientationEvent.requestPermission().then(response => {
-          if (response === 'granted') {
-            window.addEventListener('deviceorientation', handleOrientation, true);
-          }
-        });
+      let alpha = e.alpha, beta = e.beta, gamma = e.gamma;
+
+      // iOS: la brújula real viene en webkitCompassHeading
+      if (typeof e.webkitCompassHeading === 'number' && e.webkitCompassHeading >= 0) {
+        alpha = (360 - e.webkitCompassHeading) % 360;
+      }
+      if (alpha == null || beta == null || gamma == null) return;
+
+      // Rumbo de la cámara (coincide con la brújula en la posición vertical del móvil)
+      state.heading = (360 - alpha) % 360;
+
+      // Matriz completa de orientación: cabeceo (beta) + balanceo (gamma) + rumbo (alpha)
+      const target = eulerToRot(alpha, beta, gamma);
+      if (!state.orientReady) {
+        state.rot = target;
+        state.orientReady = true;
       } else {
-        window.addEventListener('deviceorientationabsolute', handleOrientation, true);
-        window.addEventListener('deviceorientation', handleOrientation, true);
+        // Suavizado para reducir temblor
+        for (let i = 0; i < 9; i++) {
+          state.rot[i] += (target[i] - state.rot[i]) * 0.35;
+        }
+      }
+
+      document.getElementById('heading-val').textContent = `${Math.round(state.heading).toString().padStart(3, '0')}°`;
+      updateCompassTape();
+    }
+
+    function initOrientation() {
+      const onAbs = (e) => handleOrientation(e, true);
+      const onRel = (e) => handleOrientation(e, false);
+
+      // Android: preferimos la orientación absoluta (con brújula real).
+      // Siempre registramos ambos; en iOS la absoluta nunca llega y la relativa usa webkitCompassHeading.
+      window.addEventListener('deviceorientationabsolute', onAbs, true);
+      window.addEventListener('deviceorientation', onRel, true);
+
+      // iOS 13+: hay que pedir permiso explícito (debe venir de un toque del usuario)
+      if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+        DeviceOrientationEvent.requestPermission().catch(() => {});
       }
     }
 
-    /* Geolocalización GPS en Tiempo Real */
+    /* Mantener la pantalla encendida durante el trabajo de campo */
+    async function keepAwake() {
+      try {
+        if ('wakeLock' in navigator) {
+          await navigator.wakeLock.request('screen');
+        }
+      } catch (e) {}
+    }
+
+    /* ===================== GPS ===================== */
     function initGPS() {
       if (!navigator.geolocation) {
         alert("Geolocalización no soportada en este navegador.");
@@ -648,7 +850,6 @@
             lng: pos.coords.longitude,
             accuracy: pos.coords.accuracy
           };
-
           document.getElementById('gps-accuracy').textContent = `±${Math.round(pos.coords.accuracy)} m`;
           checkPerimeterStatus();
         },
@@ -664,16 +865,14 @@
       );
     }
 
-    /* Algoritmos Geográficos: Ray-Casting & Haversine */
-    
-    // Comprueba si un punto (Lat, Lng) está dentro de un Polígono
+    /* ===================== Geometría geográfica ===================== */
+    // Punto dentro de polígono (ray-casting)
     function isPointInPolygon(point, vs) {
       let x = point.lat, y = point.lng;
       let inside = false;
       for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
         let xi = vs[i].lat, yi = vs[i].lng;
         let xj = vs[j].lat, yj = vs[j].lng;
-
         let intersect = ((yi > y) !== (yj > y)) &&
             (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
         if (intersect) inside = !inside;
@@ -681,53 +880,42 @@
       return inside;
     }
 
-    // Calcula Distancia (metros) y Bearing (grados) entre dos coordenadas GPS
-    function getDistanceAndBearing(lat1, lon1, lat2, lon2) {
-      const R = 6371000; // Radio Tierra en metros
-      const dLat = (lat2 - lat1) * Math.PI / 180;
-      const dLon = (lon2 - lon1) * Math.PI / 180;
-      const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-                Math.sin(dLon / 2) * Math.sin(dLon / 2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      const distance = R * c;
-
-      const y = Math.sin(dLon) * Math.cos(lat2 * Math.PI / 180);
-      const x = Math.cos(lat1 * Math.PI / 180) * Math.sin(lat2 * Math.PI / 180) -
-                Math.sin(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.cos(dLon);
-      let bearing = Math.atan2(y, x) * 180 / Math.PI;
-      bearing = (bearing + 360) % 360;
-
-      return { distance, bearing };
-    }
-
-    // Distancia mínima desde la ubicación al segmento/límite más cercano
-    function getDistanceToPerimeter(userLat, userLng, poly) {
-      if (poly.length < 2) return 0;
-      let minDistance = Infinity;
-
-      for (let i = 0; i < poly.length; i++) {
-        let p1 = poly[i];
-        let p2 = poly[(i + 1) % poly.length];
-        let d = getDistanceAndBearing(userLat, userLng, p1.lat, p1.lng).distance;
-        if (d < minDistance) minDistance = d;
-      }
-      return minDistance;
-    }
-
-    /* Verificación de Perímetro y Actualización de HUD */
+    /* ===================== Verificación de perímetro ===================== */
     function checkPerimeterStatus() {
-      if (!state.userCoords || state.polygon.length < 3) return;
-
-      const wasInside = state.isInside;
-      state.isInside = isPointInPolygon(state.userCoords, state.polygon);
-      state.distanceToNearestEdge = getDistanceToPerimeter(state.userCoords.lat, state.userCoords.lng, state.polygon);
-
       const dot = document.getElementById('status-dot');
       const statusText = document.getElementById('status-text');
       const distVal = document.getElementById('dist-val');
 
-      distVal.textContent = `${Math.round(state.distanceToNearestEdge)} m`;
+      if (!state.userCoords) return;
+
+      if (!state.polygons.length) {
+        dot.className = 'status-dot';
+        statusText.textContent = 'SIN RECINTO CARGADO';
+        statusText.style.color = '';
+        distVal.textContent = '-- m';
+        return;
+      }
+
+      const wasInside = state.isInside;
+      const o = state.userCoords;
+      const polys = polygonsENU(o);
+
+      let inside = false;
+      let minD = Infinity;
+      for (const p of state.polygons) {
+        if (isPointInPolygon(o, p.points)) inside = true;
+      }
+      for (const p of polys) {
+        for (let i = 0; i < p.pts.length; i++) {
+          const A = p.pts[i], B = p.pts[(i + 1) % p.pts.length];
+          const d = distToSegment(0, 0, A.x, A.y, B.x, B.y);
+          if (d < minD) minD = d;
+        }
+      }
+
+      state.isInside = inside;
+      state.distanceToNearestEdge = minD;
+      distVal.textContent = `${Math.round(minD)} m`;
 
       if (state.isInside) {
         dot.className = 'status-dot inside';
@@ -748,12 +936,11 @@
       }
     }
 
-    /* Renderizador de Cinta de Brújula HUD */
+    /* ===================== Cinta de brújula HUD ===================== */
     function initCompassTape() {
       const tape = document.getElementById('compass-tape');
       const cardinales = { 0: 'N', 45: 'NE', 90: 'E', 135: 'SE', 180: 'S', 225: 'SO', 270: 'O', 315: 'NO' };
       let html = '';
-
       for (let deg = -180; deg <= 540; deg += 15) {
         let normDeg = (deg + 360) % 360;
         let label = cardinales[normDeg] !== undefined ? cardinales[normDeg] : normDeg;
@@ -766,143 +953,394 @@
 
     function updateCompassTape() {
       const tape = document.getElementById('compass-tape');
-      // Cada tick son 40px por 15 grados -> 2.666px por grado
       const pxPerDegree = 40 / 15;
       const offset = -(state.heading * pxPerDegree) + (window.innerWidth / 2) - 20;
       tape.style.transform = `translateX(${offset}px)`;
     }
 
-    /* Motor de Renderizado AR Canvas 2D/3D */
+    /* ===================== Construcción de paredes 3D ===================== */
+    function addFace(list, verts, normal, kind) {
+      let cx = 0, cy = 0, cz = 0;
+      for (const v of verts) { cx += v[0]; cy += v[1]; cz += v[2]; }
+      cx /= verts.length; cy /= verts.length; cz /= verts.length;
+      // Cámara en el origen: solo se dibujan caras que miran hacia el usuario
+      if (normal[0] * cx + normal[1] * cy + normal[2] * cz >= 0) return;
+      list.push({ verts, kind, dist: Math.hypot(cx, cy, cz) });
+    }
+
+    // Cada tramo del recinto es un bloque con grosor: 2 caras laterales, tapa superior y 2 extremos
+    function buildWallFaces(polys) {
+      const faces = [];
+      const h = state.config.wallThickness / 2;
+      const zb = -CAM_HEIGHT;                       // suelo
+      const zt = zb + state.config.fenceHeight;     // parte superior de la valla
+
+      for (const p of polys) {
+        const P = p.pts, n = P.length;
+        for (let i = 0; i < n; i++) {
+          const A = P[i], B = P[(i + 1) % n];
+          const dx = B.x - A.x, dy = B.y - A.y;
+          const len = Math.hypot(dx, dy);
+          if (len < 0.05) continue;
+
+          const ux = dx / len, uy = dy / len;   // dirección del tramo
+          const nx = -uy, ny = ux;              // normal horizontal
+          const ox = nx * h, oy = ny * h;       // desplazamiento del grosor
+
+          const a0 = [A.x - ox, A.y - oy], a1 = [A.x + ox, A.y + oy];
+          const b0 = [B.x - ox, B.y - oy], b1 = [B.x + ox, B.y + oy];
+
+          // Caras laterales (una de ellas queda de espaldas según la cámara)
+          addFace(faces, [[a1[0], a1[1], zb], [b1[0], b1[1], zb], [b1[0], b1[1], zt], [a1[0], a1[1], zt]], [nx, ny, 0], 'side');
+          addFace(faces, [[a0[0], a0[1], zb], [b0[0], b0[1], zb], [b0[0], b0[1], zt], [a0[0], a0[1], zt]], [-nx, -ny, 0], 'side');
+          // Tapa superior
+          addFace(faces, [[a0[0], a0[1], zt], [a1[0], a1[1], zt], [b1[0], b1[1], zt], [b0[0], b0[1], zt]], [0, 0, 1], 'top');
+          // Extremos del tramo
+          addFace(faces, [[a0[0], a0[1], zb], [a0[0], a0[1], zt], [a1[0], a1[1], zt], [a1[0], a1[1], zb]], [-ux, -uy, 0], 'cap');
+          addFace(faces, [[b0[0], b0[1], zb], [b0[0], b0[1], zt], [b1[0], b1[1], zt], [b1[0], b1[1], zb]], [ux, uy, 0], 'cap');
+        }
+      }
+      return faces;
+    }
+
+    // Recorte contra el plano cercano (para caras que cruzan detrás de la cámara)
+    function clipNear(poly) {
+      const out = [];
+      for (let i = 0; i < poly.length; i++) {
+        const P = poly[i], Q = poly[(i + 1) % poly.length];
+        const pin = P.d >= NEAR, qin = Q.d >= NEAR;
+        if (pin) out.push(P);
+        if (pin !== qin) {
+          const t = (NEAR - P.d) / (Q.d - P.d);
+          out.push({ x: P.x + (Q.x - P.x) * t, y: P.y + (Q.y - P.y) * t, d: NEAR });
+        }
+      }
+      return out;
+    }
+
+    /* ===================== Render AR (3D sobre la cámara) ===================== */
     function renderAR() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const W = canvas.width, H = canvas.height;
+      ctx.clearRect(0, 0, W, H);
+      if (!state.userCoords || !state.polygons.length) return;
 
-      if (state.userCoords && state.polygon.length >= 2) {
-        const cx = canvas.width / 2;
-        const cy = canvas.height / 2;
-        const fovHorizontal = 60; // Grados del campo de visión estimado de cámara móvil
+      const polys = polygonsENU(state.userCoords);
+      const faces = buildWallFaces(polys);
+      const rot = state.rot;
+      const f = (W / 2) / Math.tan(HFOV * D2R / 2);   // distancia focal en píxeles
+      const cx = W / 2, cy = H / 2;
 
-        const currentColor = state.isInside ? state.config.colorInside : state.config.colorOutside;
-        ctx.fillStyle = currentColor;
-        ctx.strokeStyle = currentColor;
-        ctx.lineWidth = 4;
-        ctx.globalAlpha = state.config.fenceOpacity;
+      // Proyección de cada cara
+      const items = [];
+      for (const fc of faces) {
+        const cs = fc.verts.map(v => {
+          const d = toDevice(rot, v[0], v[1], v[2]);
+          return { x: d[0], y: d[1], d: -d[2] };   // d = profundidad (hacia delante de la cámara)
+        });
+        const cl = clipNear(cs);
+        if (cl.length < 3) continue;
+        items.push({
+          kind: fc.kind,
+          dist: fc.dist,
+          scr: cl.map(p => ({ x: cx + f * p.x / p.d, y: cy - f * p.y / p.d }))
+        });
+      }
 
-        // Renderizar cada segmento del perímetro en el espacio de la pantalla
-        for (let i = 0; i < state.polygon.length; i++) {
-          let p1 = state.polygon[i];
-          let p2 = state.polygon[(i + 1) % state.polygon.length];
+      // Pintor: lo más lejano primero
+      items.sort((a, b) => b.dist - a.dist);
 
-          let data1 = getDistanceAndBearing(state.userCoords.lat, state.userCoords.lng, p1.lat, p1.lng);
-          let data2 = getDistanceAndBearing(state.userCoords.lat, state.userCoords.lng, p2.lat, p2.lng);
+      const col = state.isInside ? state.config.colorInside : state.config.colorOutside;
+      const op = state.config.fenceOpacity;
 
-          // Proyectar vértices basándose en rumbo e ángulo relativo
-          let relAngle1 = (data1.bearing - state.heading + 540) % 360 - 180;
-          let relAngle2 = (data2.bearing - state.heading + 540) % 360 - 180;
+      for (const it of items) {
+        ctx.beginPath();
+        it.scr.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+        ctx.closePath();
 
-          // Solo renderizar si al menos un vértice está en frente del campo visual (-90 a 90 deg)
-          if (Math.abs(relAngle1) < 85 || Math.abs(relAngle2) < 85) {
-            let x1 = cx + (relAngle1 / (fovHorizontal / 2)) * cx;
-            let x2 = cx + (relAngle2 / (fovHorizontal / 2)) * cx;
-
-            // Escala de perspectiva por distancia (Z-index simulado)
-            let scale1 = Math.min(Math.max(100 / (data1.distance + 1), 0.1), 3);
-            let scale2 = Math.min(Math.max(100 / (data2.distance + 1), 0.1), 3);
-
-            let heightPx1 = state.config.fenceHeight * scale1 * 20;
-            let heightPx2 = state.config.fenceHeight * scale2 * 20;
-
-            let yBase1 = cy + (scale1 * 30);
-            let yBase2 = cy + (scale2 * 30);
-
-            // Dibujar la rejilla de la valla virtual
-            ctx.beginPath();
-            ctx.moveTo(x1, yBase1);
-            ctx.lineTo(x1, yBase1 - heightPx1);
-            ctx.lineTo(x2, yBase2 - heightPx2);
-            ctx.lineTo(x2, yBase2);
-            ctx.closePath();
-
-            // Relleno de la valla
-            let grad = ctx.createLinearGradient(0, yBase1 - heightPx1, 0, yBase1);
-            grad.addColorStop(0, currentColor);
-            grad.addColorStop(1, 'transparent');
-            ctx.fillStyle = grad;
-            ctx.fill();
-            ctx.stroke();
-
-            // Dibujar poste vertical indicador en el vértice
-            ctx.beginPath();
-            ctx.arc(x1, yBase1 - heightPx1, 6, 0, Math.PI * 2);
-            ctx.fill();
+        if (it.kind === 'side') {
+          let y0 = Infinity, y1 = -Infinity;
+          for (const p of it.scr) { if (p.y < y0) y0 = p.y; if (p.y > y1) y1 = p.y; }
+          if (y1 - y0 > 1) {
+            const g = ctx.createLinearGradient(0, y0, 0, y1);
+            g.addColorStop(0, colorStr(col, op));
+            g.addColorStop(1, colorStr(col, op * 0.3));
+            ctx.fillStyle = g;
+          } else {
+            ctx.fillStyle = colorStr(col, op);
           }
+        } else if (it.kind === 'top') {
+          ctx.fillStyle = colorStr(col, Math.min(1, op + 0.3), 0.45);
+        } else {
+          ctx.fillStyle = colorStr(col, op, -0.35);
+        }
+        ctx.fill();
+        ctx.strokeStyle = colorStr(col, Math.min(1, op + 0.25), 0.5);
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+      }
+
+      // Postes en las esquinas superiores
+      const zt = -CAM_HEIGHT + state.config.fenceHeight;
+      ctx.fillStyle = colorStr(col, 1);
+      for (const p of polys) {
+        for (const q of p.pts) {
+          const d = toDevice(rot, q.x, q.y, zt);
+          const depth = -d[2];
+          if (depth < NEAR) continue;
+          const sx = cx + f * d[0] / depth;
+          const sy = cy - f * d[1] / depth;
+          const r = Math.min(Math.max(f * 0.15 / depth, 2), 8);
+          ctx.beginPath();
+          ctx.arc(sx, sy, r, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+
+    /* ===================== Render vista de mapa 2D ===================== */
+    function drawMap() {
+      const W = mapCanvas.width, H = mapCanvas.height;
+      mctx.fillStyle = '#0b132b';
+      mctx.fillRect(0, 0, W, H);
+
+      if (!state.polygons.length) {
+        mctx.fillStyle = 'rgba(255,255,255,0.6)';
+        mctx.font = '600 15px sans-serif';
+        mctx.textAlign = 'center';
+        mctx.fillText('Carga un KMZ / KML para ver los recintos', W / 2, H / 2);
+        mctx.textAlign = 'start';
+        return;
+      }
+
+      const origin = state.userCoords || state.fallbackOrigin;
+      const polys = polygonsENU(origin);
+
+      // Límites (incluyendo al usuario en el origen)
+      let minX = -10, maxX = 10, minY = -10, maxY = 10;
+      for (const p of polys) for (const q of p.pts) {
+        if (q.x < minX) minX = q.x; if (q.x > maxX) maxX = q.x;
+        if (q.y < minY) minY = q.y; if (q.y > maxY) maxY = q.y;
+      }
+      const bw = maxX - minX, bh = maxY - minY;
+      const top = 150, bottom = 200, side = 30;
+      const availW = W - 2 * side, availH = H - top - bottom;
+      const s = Math.min(availW / bw, availH / bh);          // píxeles por metro
+      const cxm = (minX + maxX) / 2, cym = (minY + maxY) / 2;
+      const ox = W / 2, oy = top + availH / 2;
+      const toS = (x, y) => ({ x: ox + (x - cxm) * s, y: oy - (y - cym) * s });
+
+      // Rejilla de referencia
+      const raw = 90 / s;
+      const steps = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000];
+      const step = steps.find(v => v >= raw) || 5000;
+      const vx0 = cxm - (W / 2) / s, vx1 = cxm + (W / 2) / s;
+      const vy0 = cym - (H / 2) / s, vy1 = cym + (H / 2) / s;
+      mctx.strokeStyle = 'rgba(0,242,254,0.08)';
+      mctx.lineWidth = 1;
+      mctx.beginPath();
+      for (let x = Math.ceil(vx0 / step) * step; x <= vx1; x += step) {
+        const p = toS(x, 0); mctx.moveTo(p.x, 0); mctx.lineTo(p.x, H);
+      }
+      for (let y = Math.ceil(vy0 / step) * step; y <= vy1; y += step) {
+        const p = toS(0, y); mctx.moveTo(0, p.y); mctx.lineTo(W, p.y);
+      }
+      mctx.stroke();
+
+      // Recintos
+      for (const p of polys) {
+        mctx.beginPath();
+        let sx = 0, sy = 0;
+        p.pts.forEach((q, i) => {
+          const sp = toS(q.x, q.y);
+          i ? mctx.lineTo(sp.x, sp.y) : mctx.moveTo(sp.x, sp.y);
+          sx += sp.x; sy += sp.y;
+        });
+        mctx.closePath();
+        mctx.fillStyle = 'rgba(0,242,254,0.16)';
+        mctx.fill();
+        mctx.strokeStyle = '#00f2fe';
+        mctx.lineWidth = 2.5;
+        mctx.stroke();
+
+        // Nombre del recinto
+        const n = p.pts.length;
+        mctx.font = '700 13px sans-serif';
+        mctx.textAlign = 'center';
+        mctx.lineWidth = 3;
+        mctx.strokeStyle = 'rgba(11,19,43,0.9)';
+        mctx.strokeText(p.name, sx / n, sy / n);
+        mctx.fillStyle = '#e0e6ed';
+        mctx.fillText(p.name, sx / n, sy / n);
+        mctx.textAlign = 'start';
+      }
+
+      // Usuario y cono de visión
+      if (state.userCoords) {
+        const u = toS(0, 0);
+        const accR = Math.min(Math.max((state.userCoords.accuracy || 0) * s, 6), 200);
+        mctx.beginPath();
+        mctx.arc(u.x, u.y, accR, 0, Math.PI * 2);
+        mctx.fillStyle = 'rgba(79,172,254,0.15)';
+        mctx.fill();
+        mctx.strokeStyle = 'rgba(79,172,254,0.5)';
+        mctx.lineWidth = 1;
+        mctx.stroke();
+
+        const h = state.heading * D2R;
+        mctx.beginPath();
+        mctx.moveTo(u.x, u.y);
+        for (const da of [-30, 30]) {
+          const a = h + da * D2R;
+          mctx.lineTo(u.x + Math.sin(a) * 80, u.y - Math.cos(a) * 80);
+        }
+        mctx.closePath();
+        mctx.fillStyle = 'rgba(0,242,254,0.25)';
+        mctx.fill();
+
+        mctx.beginPath();
+        mctx.arc(u.x, u.y, 8, 0, Math.PI * 2);
+        mctx.fillStyle = '#00f2fe';
+        mctx.fill();
+        mctx.lineWidth = 2;
+        mctx.strokeStyle = '#ffffff';
+        mctx.stroke();
+      }
+
+      // Indicador de norte
+      const nx = W - 28, ny = top;
+      mctx.beginPath();
+      mctx.moveTo(nx, ny - 14);
+      mctx.lineTo(nx - 7, ny + 4);
+      mctx.lineTo(nx + 7, ny + 4);
+      mctx.closePath();
+      mctx.fillStyle = '#00f2fe';
+      mctx.fill();
+      mctx.font = '700 13px sans-serif';
+      mctx.textAlign = 'center';
+      mctx.fillText('N', nx, ny + 19);
+      mctx.textAlign = 'start';
+    }
+
+    /* Bucle de render: solo dibuja la vista activa */
+    let loopStarted = false;
+    function renderLoop() {
+      if (state.view === 'map') drawMap();
+      else renderAR();
+      requestAnimationFrame(renderLoop);
+    }
+
+    /* ===================== Cambio de vista Mapa / AR ===================== */
+    function setView(v) {
+      state.view = v;
+      const isAR = v === 'ar';
+      video.style.display = isAR ? 'block' : 'none';
+      canvas.style.display = isAR ? 'block' : 'none';
+      mapCanvas.style.display = isAR ? 'none' : 'block';
+
+      document.getElementById('icon-view').innerHTML = isAR ? ICON_MAP : ICON_CAM;
+      document.getElementById('label-view').textContent = isAR ? 'MAPA' : 'AR';
+    }
+    document.getElementById('btn-view').addEventListener('click', () => {
+      setView(state.view === 'ar' ? 'map' : 'ar');
+    });
+
+    /* ===================== Carga de KML / KMZ (todos los recintos) ===================== */
+    function parseCoords(text) {
+      const pts = [];
+      for (const tuple of text.trim().split(/\s+/)) {
+        const parts = tuple.split(',');
+        if (parts.length < 2) continue;
+        const lng = parseFloat(parts[0]);
+        const lat = parseFloat(parts[1]);
+        if (!isNaN(lat) && !isNaN(lng)) pts.push({ lat, lng });
+      }
+      // Quitar el vértice de cierre duplicado
+      if (pts.length > 1) {
+        const a = pts[0], b = pts[pts.length - 1];
+        if (a.lat === b.lat && a.lng === b.lng) pts.pop();
+      }
+      return pts;
+    }
+
+    function setPolygons(polys, silent) {
+      state.polygons = polys;
+
+      // Centro de todos los recintos (para ver el mapa sin GPS)
+      let sLat = 0, sLng = 0, n = 0;
+      for (const p of polys) for (const q of p.points) { sLat += q.lat; sLng += q.lng; n++; }
+      state.fallbackOrigin = n ? { lat: sLat / n, lng: sLng / n } : null;
+
+      const total = polys.reduce((acc, p) => acc + p.points.length, 0);
+      document.getElementById('points-count').textContent = total;
+
+      if (!silent) {
+        try { localStorage.setItem('saved_polygons', JSON.stringify(polys)); } catch (e) {}
+      }
+      checkPerimeterStatus();
+    }
+
+    function parseKMLText(kmlText) {
+      const xmlDoc = new DOMParser().parseFromString(kmlText, "text/xml");
+      const polys = [];
+
+      // Cada Placemark es un recinto con su nombre
+      for (const pm of xmlDoc.getElementsByTagName("Placemark")) {
+        const outer = pm.getElementsByTagName("outerBoundaryIs")[0];
+        const coordNode = outer
+          ? outer.getElementsByTagName("coordinates")[0]
+          : pm.getElementsByTagName("coordinates")[0];
+        if (!coordNode) continue;
+        const pts = parseCoords(coordNode.textContent);
+        if (pts.length < 3) continue;
+        const nameNode = pm.getElementsByTagName("name")[0];
+        const name = nameNode && nameNode.textContent.trim() ? nameNode.textContent.trim() : `Recinto ${polys.length + 1}`;
+        polys.push({ name, points: pts });
+      }
+
+      // Si no hay Placemarks, usamos cualquier bloque de coordenadas
+      if (!polys.length) {
+        for (const node of xmlDoc.getElementsByTagName("coordinates")) {
+          const pts = parseCoords(node.textContent);
+          if (pts.length >= 3) polys.push({ name: `Recinto ${polys.length + 1}`, points: pts });
         }
       }
 
-      requestAnimationFrame(renderAR);
-    }
-
-    /* Parsers de Archivos KMZ y KML */
-    function parseKMLText(kmlText) {
-      const parser = new DOMParser();
-      const xmlDoc = parser.parseFromString(kmlText, "text/xml");
-      const coordinatesNodes = xmlDoc.getElementsByTagName("coordinates");
-
-      let parsedPolygon = [];
-
-      for (let i = 0; i < coordinatesNodes.length; i++) {
-        let text = coordinatesNodes[i].textContent.trim();
-        let tupleList = text.split(/\s+/);
-
-        tupleList.forEach(tuple => {
-          let parts = tuple.split(',');
-          if (parts.length >= 2) {
-            let lng = parseFloat(parts[0]);
-            let lat = parseFloat(parts[1]);
-            if (!isNaN(lat) && !isNaN(lng)) {
-              parsedPolygon.push({ lat, lng });
-            }
-          }
-        });
-        if (parsedPolygon.length >= 3) break; // Cargar el primer polígono cerrado válido
-      }
-
-      if (parsedPolygon.length >= 3) {
-        state.polygon = parsedPolygon;
-        document.getElementById('points-count').textContent = state.polygon.length;
-        localStorage.setItem('saved_polygon', JSON.stringify(state.polygon));
-        checkPerimeterStatus();
-        alert(`Recinto cargado con éxito. ${state.polygon.length} vértices detectados.`);
-      } else {
+      if (!polys.length) {
         alert("No se pudieron encontrar coordenadas de polígono válidas en el archivo KML/KMZ.");
+        return;
       }
+
+      setPolygons(polys);
+      const total = polys.reduce((acc, p) => acc + p.points.length, 0);
+      alert(`${polys.length} recinto(s) cargado(s): ${polys.map(p => p.name).join(', ')}. ${total} vértices en total.`);
     }
 
     async function handleFileSelect(e) {
-      const file = e.target.files[0];
+      const input = e.target;
+      const file = input.files[0];
       if (!file) return;
-
       const fileName = file.name.toLowerCase();
 
-      if (fileName.endsWith('.kmz')) {
-        try {
+      try {
+        if (fileName.endsWith('.kmz')) {
           const zip = await JSZip.loadAsync(file);
-          let kmlFile = zip.file(/\.kml$/i)[0];
+          const kmlFile = zip.file(/\.kml$/i)[0];
           if (kmlFile) {
-            const kmlText = await kmlFile.async("string");
-            parseKMLText(kmlText);
+            parseKMLText(await kmlFile.async("string"));
           } else {
-            alert("No se encontró ningún archivo .doc.kml dentro del paquete KMZ.");
+            alert("No se encontró ningún archivo .kml dentro del KMZ.");
           }
-        } catch (err) {
-          alert("Error al descomprimir KMZ: " + err.message);
+        } else if (fileName.endsWith('.kml')) {
+          const reader = new FileReader();
+          reader.onload = (event) => parseKMLText(event.target.result);
+          reader.readAsText(file);
+        } else {
+          alert("Formato no soportado. Selecciona un archivo .KML o .KMZ");
         }
-      } else if (fileName.endsWith('.kml')) {
-        const reader = new FileReader();
-        reader.onload = (event) => parseKMLText(event.target.result);
-        reader.readAsText(file);
-      } else {
-        alert("Formato no soportado. Selecciona un archivo .KML o .KMZ");
+      } catch (err) {
+        alert("Error al leer el archivo: " + err.message);
       }
+      input.value = ''; // permite volver a cargar el mismo archivo
     }
 
     /* Recinto Demo de Prueba al rededor de la posición del usuario */
@@ -914,28 +1352,31 @@
       const lat = state.userCoords.lat;
       const lng = state.userCoords.lng;
       const offset = 0.0003; // ~30 metros alrededor
-
-      state.polygon = [
-        { lat: lat + offset, lng: lng - offset },
-        { lat: lat + offset, lng: lng + offset },
-        { lat: lat - offset, lng: lng + offset },
-        { lat: lat - offset, lng: lng - offset }
-      ];
-
-      document.getElementById('points-count').textContent = state.polygon.length;
-      localStorage.setItem('saved_polygon', JSON.stringify(state.polygon));
-      checkPerimeterStatus();
+      setPolygons([{
+        name: 'Demo',
+        points: [
+          { lat: lat + offset, lng: lng - offset },
+          { lat: lat + offset, lng: lng + offset },
+          { lat: lat - offset, lng: lng + offset },
+          { lat: lat - offset, lng: lng - offset }
+        ]
+      }]);
       document.getElementById('modal-settings').classList.remove('active');
       alert("Recinto Cuadrado de prueba (30m) cargado en tu ubicación actual.");
     }
 
-    /* Event Listeners de la Interfaz y Configuración */
+    /* ===================== Interfaz y Eventos ===================== */
     document.getElementById('btn-start').addEventListener('click', () => {
       document.getElementById('permission-screen').style.display = 'none';
       initCamera();
       initOrientation();
       initGPS();
-      requestAnimationFrame(renderAR);
+      keepAwake();
+      setView('ar');
+      if (!loopStarted) {
+        loopStarted = true;
+        requestAnimationFrame(renderLoop);
+      }
     });
 
     document.getElementById('btn-load').addEventListener('click', () => {
@@ -952,6 +1393,11 @@
     document.getElementById('range-height').addEventListener('input', (e) => {
       state.config.fenceHeight = parseInt(e.target.value);
       document.getElementById('val-fence-height').textContent = `${e.target.value} m`;
+    });
+
+    document.getElementById('range-thickness').addEventListener('input', (e) => {
+      state.config.wallThickness = parseInt(e.target.value) / 100;
+      document.getElementById('val-fence-thickness').textContent = `${e.target.value} cm`;
     });
 
     document.getElementById('range-opacity').addEventListener('input', (e) => {
@@ -975,14 +1421,21 @@
 
     document.getElementById('btn-demo').addEventListener('click', loadDemoPolygon);
 
-    // Cargar polígono previo de LocalStorage si existe
-    const saved = localStorage.getItem('saved_polygon');
-    if (saved) {
+    // Restaurar recintos guardados (o el formato antiguo de un solo polígono)
+    (function restoreSaved() {
       try {
-        state.polygon = JSON.parse(saved);
-        document.getElementById('points-count').textContent = state.polygon.length;
+        const s = localStorage.getItem('saved_polygons');
+        if (s) {
+          const polys = JSON.parse(s);
+          if (Array.isArray(polys) && polys.length) { setPolygons(polys, true); return; }
+        }
+        const old = localStorage.getItem('saved_polygon');
+        if (old) {
+          const pts = JSON.parse(old);
+          if (Array.isArray(pts) && pts.length >= 3) setPolygons([{ name: 'Recinto', points: pts }], true);
+        }
       } catch (e) {}
-    }
+    })();
   </script>
 </body>
 </html>
